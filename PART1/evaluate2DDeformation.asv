@@ -1,0 +1,253 @@
+function evaluate2DDeformation(idx1,idx2)
+%clear all;
+close all;
+
+
+
+%%  Load Speckle Patterns
+idex={num2str(idx1);num2str(idx2)};
+img1 = imread(['Image00',idex{1}, '.bmp']); img1= double(img1);
+img2 = imread(['Image00',idex{2}, '.bmp']); img2= double(img2);
+
+x0 = 1;y0=1;
+img1 = img1';
+img2 = img2';
+size_ = size(img1);
+mm = size_(1);
+nn = size_(2);
+%% Average over the set of images to get the systematic background fluctuations
+indexRange = 13:1:20;
+meanBackground = zeros(size_(1),size_(2));
+for m = indexRange
+    eval(['img = imread("Image00', num2str(m),'.bmp");']);
+    img = img';
+    meanBackground = meanBackground + double(img);
+end
+meanBackground = meanBackground/(20-13+1);
+
+%% Interferrence Pattern
+res0 = abs(img1-img2);
+res_norm0 = norm__(res0);
+
+figure, imshow(norm__(img1));
+title(['Speckle Pattern ',idex{1}]);
+figure, imshow(norm__(img2));
+title(['Speckle Pattern ',idex{2}]);
+figure, imshow(res_norm0);
+title('Interferrence Pattern');
+I = res_norm0;
+imwrite(I,['.\image2\ip_' ,idex{1},'-',idex{2},'.png'  ]); 
+
+%% Interferrence Pattern - Main Systematic Error mitigated
+res1 = res0./meanBackground;
+res_norm1 = norm__(res1);
+
+figure, imshow(norm__(meanBackground));
+title('Mean Background');
+figure, imshow(norm__(img1./meanBackground));
+title(['Speckle Pattern - Systematic-Error-Corrected ',idex{1}]);
+    I = norm__(img1./meanBackground);
+    imwrite(I,['.\image2\ZZZ_' ,idex{1},'.png'  ]); 
+figure, imshow(norm__(img2./meanBackground));
+title(['Speckle Pattern - Systematic-Error-Corrected ',idex{2}]);
+figure, imshow(res_norm1);
+title('Interferrence Pattern - Systematic-Error-Corrected');
+I = res_norm1;
+imwrite(I,['.\image2\ipSystematicErrorCorrected_' ,idex{1},'-',idex{2}, '.png' ]); 
+
+%% Modelling of the 2pi*nv regions (value approx 0) 
+% Play with the parameters valleyThres, d and t
+valleyThres = 0.15;
+res2_valley_dot = ceil(-res_norm1+valleyThres);
+figure, imshow(res2_valley_dot);
+title(['Interferrence Pattern - Points at intensity <= ', num2str(valleyThres)] );
+
+res2_valley_stripe = res2_valley_dot;
+d = 10;
+t = 0.77;
+
+fid = fopen( ['image2\parameters_' ,idex{1},'-',idex{2}, '.txt'], 'a' );
+fprintf( fid, 'valleyThres: %f\n', valleyThres);
+fprintf( fid, 'd: %f\n', d);
+fprintf( fid, 't: %f\n', t);
+fclose(fid);
+
+for i=1:1:mm
+    for j=1:1:nn  
+        if res2_valley_dot(i,j) >=0
+            meanBackground=0;
+            for m=1:1:2*d
+                for n=1:1:2*d
+                    if i-d+m > 0 && i-d+m < mm+1 && j-d+n > 0 && j-d+n < nn+1 && (-d+m)^2 + (-d+n)^2 <= d^2
+                        meanBackground = meanBackground +res2_valley_dot(i-d+m,j-d+n);
+                    end
+                end
+            end
+            if meanBackground/(pi*d^2) > t
+                res2_valley_stripe(i,j) = 1;
+            else
+                res2_valley_stripe(i,j) = 0;
+                
+            end
+        end
+    end
+end
+figure, imshow(res2_valley_stripe);
+title('Interferrence Pattern - Valley Regions' );
+
+
+%% Eliminating sigled out regions
+res2_valley_stripe_cleaner = res2_valley_stripe;
+d = 10;
+for i=1:1:mm
+    for j=1:1:nn    
+        if res2_valley_stripe(i,j) > 0
+            v = 0;
+            for m=1:1:2*d
+                for n=1:1:2*d
+                    if i-d+m > 0 && i-d+m < mm+1 && j-d+n > 0 && j-d+n < nn+1 && (-d+m)^2 + (-d+n)^2 <= d^2
+                        nv_ = res2_valley_stripe_cleaner(i-d+m,j-d+n);
+                        if nv_ == 0
+                            v = v+1;
+                        end
+                    end
+                end
+            end
+            if v > 0.5*d^2*pi  
+                res2_valley_stripe_cleaner(i,j) = 0; 
+            end
+        end
+        
+    end
+end
+figure, imshow(res2_valley_stripe_cleaner);
+title('Interferrence Pattern - Valley Regions Cleaner' );
+
+%% Smoothning Contour
+res2_valley_stripe_cleanerNsmooth = res2_valley_stripe_cleaner;
+d = 10;
+for i=1:1:mm
+    for j=1:1:nn    
+        if res2_valley_stripe_cleaner(i,j) < 1
+            v = 0;
+            for m=1:1:2*d
+                for n=1:1:2*d
+                    if i-d+m > 0 && i-d+m < mm+1 && j-d+n > 0 && j-d+n < nn+1 && (-d+m)^2 + (-d+n)^2 <= d^2
+                        nv_ = res2_valley_stripe_cleanerNsmooth(i-d+m,j-d+n);
+                        if nv_ == 1
+                            v = v+1;
+                        end
+                    end
+                end
+            end
+            if v > 0.65*d^2*pi  
+                res2_valley_stripe_cleanerNsmooth(i,j) = 1; 
+            end
+        end
+        
+    end
+end
+figure, imshow(res2_valley_stripe_cleanerNsmooth);
+title('Interferrence Pattern - Valley Regions Cleaner and Smoother' );
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%% From Here on With Color %%%%%%%%%%%%%%%%%%%%%%
+
+%% PEAK and Valley Separation of the 2pi*nv regions as a function of nv
+pv={'peak';'valley'};
+for auxPeakValley = 1:1:2
+
+    resAux = (0.5-0.5*(-1)^(auxPeakValley))+...
+        (-1)^(auxPeakValley)*res2_valley_stripe_cleanerNsmooth;
+    res3 = (0.5-0.5*(-1)^(auxPeakValley))+...
+        (-1)^(auxPeakValley)*res2_valley_stripe_cleanerNsmooth;
+    lmt1 = [y0, 1, size_(1); y0, 1, size_(1); y0, -1, 1; y0, -1, 1];
+    lmt2 = [y0, 1, -1; y0, 1, -1; y0,-1, 1; y0, -1, 1];
+    lmt3 = [x0, 1, size_(2); x0, -1, 1; x0, -1, 1; x0, 1, size_(2)];
+    for p = 1:1:4
+        for i=lmt1(p,1):lmt1(p,2):lmt1(p,3)
+            nv=0;
+            if resAux(y0,x0) == 1
+                nv=1;
+            end
+            b=0;
+            for k=lmt2(p,1):lmt2(p,2):i+lmt2(p,3)
+                if resAux(k,x0) > 0
+                    nv = nv+b;
+                    b=0;
+                end
+        
+                if resAux(k,x0) < 1
+                    b=1;
+                end
+            end
+            for j=lmt3(p,1):lmt3(p,2):lmt3(p,3)
+                if resAux(i,j) > 0
+                    nv = nv+b;
+                    b=0;
+                    res3(i,j)=nv;
+                end
+        
+                if resAux(i,j) < 1 
+                    res3(i,j)=0;
+                    b=1;
+                end
+            end
+        
+        end
+    end
+    
+    
+    
+    figure,imagesc(res3);
+    title(['Interferrence Pattern - sepparated', pv{auxPeakValley},...
+        ' regions'] );
+    
+    
+    
+    
+    res4 = res3;
+    d = 30;
+    for i=1:1:mm
+        for j=1:1:nn  
+            if res3(i,j) > 0
+                v = zeros(1,100);
+                for m=1:1:2*d
+                    for n=1:1:2*d
+                        if i-d+m > 0 && i-d+m < mm+1 && j-d+n > 0 && j-d+n < nn+1 && (-d+m)^2 + (-d+n)^2 <= d^2
+                            nv_ = res4(i-d+m,j-d+n);
+                            if nv_ > 0
+                                v(nv_) = v(nv_)+1;
+    
+                            end
+                        end
+                    end
+                end
+                [~,nv] = max(v);
+                res4(i,j) = nv;  
+            end
+        end
+    end
+    figure, imagesc(res4);
+    title(['Interferrence Pattern - ', pv{auxPeakValley},' regions'] );
+    eval(['res_',pv{auxPeakValley}, ' = res4;']);
+
+end
+
+Npeaks = mean(max(res_peak'));
+disp(['',num2str(Npeaks,2),'# peaks']);
+Nvalley = mean(max(res_valley'));
+disp(['',num2str(Nvalley,2),'# valleys']);
+BminusA = (Npeaks+Nvalley)*543/4;
+disp(['(b-a): ',num2str(BminusA,4)]);
+disp(['angle: ',num2str(BminusA/(6.7*10^6),2)], ' rad, or ');
+
+end
+
+
+function [M] = norm__(M)
+%% returns the normalized matrix M (0<=m_ij<=1) 
+min_ = min(min(M));
+max_ = max(max(M));
+M = (M-min_)/(max_-min_);
+
+end
